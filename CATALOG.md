@@ -14,6 +14,8 @@ SU output states and amplitudes were computed from `|0⟩` using Qiskit 2.6.1 `S
 
 HSC amplitudes come from the supplied transition specification. RND_8x9 amplitudes were computed with Qiskit 2.6.1 `Statevector`, starting at `|0⟩`; the state with the largest amplitude magnitude was selected (ties go to the lowest state index). All QASM files are OpenQASM 2.0, and filename/qubit counts were checked.
 
+The RX benchmark suite uses a fixed 10-qubit prefix of five Bell pairs followed by T gates. Its final layer places RX(pi/3) on the first k qubits and identity on the rest, with k in {0, 1, 2, 4, 6, 8, 10}. The exact terminal expansion has 2^k terms. Reference amplitudes for the fixed 0-to-0 transition use Qiskit 2.6.1 Statevector.
+
 | Family | Circuit file | Qubits | Layers | Initial state | Target final state | Transition amplitude | nonZero paths | X | N_eff |
 | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
 | CLIFFORD | [`CLIF_n12_T0.qasm`](CLIFFORD/CLIF_n12_T0.qasm) | 12 | 12 | 0 | 0 | `0.0441941738241591+4.93132006517368e-19i` | 131072 | 16384 | 131072 |
@@ -109,6 +111,13 @@ HSC amplitudes come from the supplied transition specification. RND_8x9 amplitud
 | RND_8x9 | [`RND_8x9_904800.qasm`](RND_8x9/RND_8x9_904800.qasm) | 8 | 9 | 0 | 45 | `-0.275888347648318+0.0625i` | 512 | 24.9936 | 512 |
 | RND_8x9 | [`RND_8x9_904900.qasm`](RND_8x9/RND_8x9_904900.qasm) | 8 | 9 | 0 | 10 | `0-0.125i` | 128 | 64 | 128 |
 | RND_8x9 | [`RND_8x9_905000.qasm`](RND_8x9/RND_8x9_905000.qasm) | 8 | 9 | 0 | 7 | `-0.176776695296637+0.176776695296637i` | 128 | 32 | 128 |
+| RX | [`TERMINAL_RX_n10_k00.qasm`](RX/TERMINAL_RX_n10_k00.qasm) | 10 | 4 | 0 | 0 | `0.176776695296637+0i` | | | |
+| RX | [`TERMINAL_RX_n10_k01.qasm`](RX/TERMINAL_RX_n10_k01.qasm) | 10 | 4 | 0 | 0 | `0.153093108923949+0i` | | | |
+| RX | [`TERMINAL_RX_n10_k02.qasm`](RX/TERMINAL_RX_n10_k02.qasm) | 10 | 4 | 0 | 0 | `0.132582521472478-0.0441941738241592i` | | | |
+| RX | [`TERMINAL_RX_n10_k04.qasm`](RX/TERMINAL_RX_n10_k04.qasm) | 10 | 4 | 0 | 0 | `0.0883883476483184-0.0662912607362388i` | | | |
+| RX | [`TERMINAL_RX_n10_k06.qasm`](RX/TERMINAL_RX_n10_k06.qasm) | 10 | 4 | 0 | 0 | `0.0497184455521791-0.0718155324642587i` | | | |
+| RX | [`TERMINAL_RX_n10_k08.qasm`](RX/TERMINAL_RX_n10_k08.qasm) | 10 | 4 | 0 | 0 | `0.0193349510480697-0.0662912607362388i` | | | |
+| RX | [`TERMINAL_RX_n10_k10.qasm`](RX/TERMINAL_RX_n10_k10.qasm) | 10 | 4 | 0 | 0 | `-0.00207160189800743-0.0545521833141966i` | | | |
 
 ## Extending the catalogue
 
