@@ -16,7 +16,7 @@ HSC amplitudes come from the supplied transition specification. RND_8x9 amplitud
 
 The RX benchmark suite uses a fixed 10-qubit prefix of five Bell pairs followed by T gates. Its final layer places RX(pi/3) on the first k qubits and identity on the rest, with k in {0, 1, 2, 4, 6, 8, 10}. The exact terminal expansion has 2^k terms. Reference amplitudes for the fixed 0-to-0 transition use Qiskit 2.6.1 Statevector.
 
-CLIFFORD_H_T reference amplitudes use Qiskit 2.6.1 Statevector from `|0⟩`. The six circuits share target state 0, the only output with nonzero probability in every circuit.
+CLIFFORD_H_T reference amplitudes use Qiskit 2.6.1 Statevector from `|0⟩`. The seven circuits share target state 0, the only output with nonzero probability in every circuit.
 
 | Family | Circuit file | Qubits | Layers | Initial state | Target final state | Transition amplitude | nonZero paths |
 | --- | --- | ---: | ---: | ---: | ---: | --- | ---: |
@@ -126,6 +126,7 @@ CLIFFORD_H_T reference amplitudes use Qiskit 2.6.1 Statevector from `|0⟩`. The
 | CLIFFORD_H_T | [`CLIFFORD_H8_T8.qasm`](CLIFFORD_H_T/CLIFFORD_H8_T8.qasm) | 8 | 8 | 0 | 0 | `0.0366116523516815+0.0883883476483184i` |  |
 | CLIFFORD_H_T | [`CLIFFORD_H4_T12.qasm`](CLIFFORD_H_T/CLIFFORD_H4_T12.qasm) | 8 | 8 | 0 | 0 | `0.5+0i` |  |
 | CLIFFORD_H_T | [`CLIFFORD_H0_T16.qasm`](CLIFFORD_H_T/CLIFFORD_H0_T16.qasm) | 8 | 8 | 0 | 0 | `1+0i` |  |
+| CLIFFORD_H_T | [`CLIFFORD_H2_T14.qasm`](CLIFFORD_H_T/CLIFFORD_H2_T14.qasm) | 8 | 8 | 0 | 0 | `0.5+0i` |  |
 
 ## Extending the catalogue
 
