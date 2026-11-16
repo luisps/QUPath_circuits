@@ -16,6 +16,8 @@ HSC amplitudes come from the supplied transition specification. RND_8x9 amplitud
 
 The RX benchmark suite uses a fixed 10-qubit prefix of five Bell pairs followed by T gates. Its final layer places RX(pi/3) on the first k qubits and identity on the rest, with k in {0, 1, 2, 4, 6, 8, 10}. The exact terminal expansion has 2^k terms. Reference amplitudes for the fixed 0-to-0 transition use Qiskit 2.6.1 Statevector.
 
+CLIFFORD_H_T reference amplitudes use Qiskit 2.6.1 Statevector from `|0⟩`. The six circuits share target state 0, the only output with nonzero probability in every circuit.
+
 | Family | Circuit file | Qubits | Layers | Initial state | Target final state | Transition amplitude | nonZero paths |
 | --- | --- | ---: | ---: | ---: | ---: | --- | ---: |
 | CLIFFORD | [`CLIF_n12_T0.qasm`](CLIFFORD/CLIF_n12_T0.qasm) | 12 | 12 | 0 | 0 | `0.0441941738241591+4.93132006517368e-19i` | 131072 |
@@ -118,6 +120,12 @@ The RX benchmark suite uses a fixed 10-qubit prefix of five Bell pairs followed 
 | RX | [`TERMINAL_RX_n10_k06.qasm`](RX/TERMINAL_RX_n10_k06.qasm) | 10 | 4 | 0 | 0 | `0.0497184455521791-0.0718155324642587i` | |
 | RX | [`TERMINAL_RX_n10_k08.qasm`](RX/TERMINAL_RX_n10_k08.qasm) | 10 | 4 | 0 | 0 | `0.0193349510480697-0.0662912607362388i` | |
 | RX | [`TERMINAL_RX_n10_k10.qasm`](RX/TERMINAL_RX_n10_k10.qasm) | 10 | 4 | 0 | 0 | `-0.00207160189800743-0.0545521833141966i` | |
+| CLIFFORD_H_T | [`CLIFFORD_H16_T0.qasm`](CLIFFORD_H_T/CLIFFORD_H16_T0.qasm) | 8 | 8 | 0 | 0 | `0.125+0.125i` |  |
+| CLIFFORD_H_T | [`CLIFFORD_H14_T2.qasm`](CLIFFORD_H_T/CLIFFORD_H14_T2.qasm) | 8 | 8 | 0 | 0 | `0.125+0.125i` |  |
+| CLIFFORD_H_T | [`CLIFFORD_H12_T4.qasm`](CLIFFORD_H_T/CLIFFORD_H12_T4.qasm) | 8 | 8 | 0 | 0 | `0.125+0.125i` |  |
+| CLIFFORD_H_T | [`CLIFFORD_H8_T8.qasm`](CLIFFORD_H_T/CLIFFORD_H8_T8.qasm) | 8 | 8 | 0 | 0 | `0.0366116523516815+0.0883883476483184i` |  |
+| CLIFFORD_H_T | [`CLIFFORD_H4_T12.qasm`](CLIFFORD_H_T/CLIFFORD_H4_T12.qasm) | 8 | 8 | 0 | 0 | `0.5+0i` |  |
+| CLIFFORD_H_T | [`CLIFFORD_H0_T16.qasm`](CLIFFORD_H_T/CLIFFORD_H0_T16.qasm) | 8 | 8 | 0 | 0 | `1+0i` |  |
 
 ## Extending the catalogue
 
