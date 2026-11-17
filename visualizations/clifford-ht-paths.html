@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QUPath trace viewer</title>
+<div id="ht-suite-paths">
+  <h1>QUPath trace viewer</h1>
+  <label>Trace files <input id="trace-files" type="file" accept=".data" multiple></label>
+  <p id="trace-status" role="status">Select one or more QUPath trace files.</p>
+  <label class="form-label">Circuit <select class="form-control" id="ht-circuit" disabled></select></label>
+  <div class="path-panels">
+    <section data-mode="CBS"><h2>CBS RGB</h2><div class="path-count text-small text-muted"></div><label class="form-label">Highlight state sequence <select class="form-control"></select></label><div class="path-amplitude text-small" aria-live="polite"></div><div class="path-chart"></div></section>
+    <section data-mode="SS"><h2>SS ALL</h2><div class="path-count text-small text-muted"></div><label class="form-label">Highlight state sequence <select class="form-control"></select></label><div class="path-amplitude text-small" aria-live="polite"></div><div class="path-chart"></div></section>
+  </div>
+  <section id="polar-diagrams" hidden>
+    <h2>Path amplitudes</h2>
+    <div class="path-panels">
+      <section data-polar-mode="CBS"></section>
+      <section data-polar-mode="SS"></section>
+    </div>
+  </section>
+</div>
+<style>
+#polar-diagrams{margin-top:2rem;border-top:1px solid var(--border)}
+#polar-diagrams [data-polar-mode]{text-align:center}
+#polar-diagrams svg{display:block;width:100%;max-width:440px;margin:auto;color:var(--foreground)}
+#polar-diagrams .polar-sum,#polar-diagrams .polar-overflow{color:#b92132;margin:.25rem 0}
+#polar-diagrams .polar-overflow{font-size:.9rem}
+
+#ht-suite-paths{font:1rem/1.5 system-ui,sans-serif;margin:1rem;--font-size-base:1rem;--foreground:#182537;--border:#c9d4df;--muted-foreground:#50677f;--card:#fff;--primary:#125db1;--accent:#e0efff}
+#ht-suite-paths select,#ht-suite-paths input{font:inherit}
+
+#ht-suite-paths .path-panels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:calc(var(--font-size-base)*1.5);margin-top:calc(var(--font-size-base)*.5)}
+#ht-suite-paths .path-count{margin:calc(var(--font-size-base)*.25) 0 calc(var(--font-size-base)*.75)}
+#ht-suite-paths .path-amplitude{min-height:2em;margin-top:calc(var(--font-size-base)*.25)}
+#ht-suite-paths .path-chart svg{display:block;width:100%;color:var(--foreground)}
+#ht-suite-paths .path-chart text{fill:currentColor}
+#ht-suite-paths .path-chart .guide{stroke:var(--border)}
+#ht-suite-paths .path-chart .edge{stroke:var(--muted-foreground);stroke-opacity:.44}
+#ht-suite-paths .path-chart .selected{stroke:var(--viz-series-1,var(--primary));stroke-opacity:1}
+#ht-suite-paths .path-chart .node{fill:var(--card);stroke:var(--border)}
+#ht-suite-paths .path-chart .node.selected{fill:var(--accent)}
+#ht-suite-paths .path-chart .node.intermediate{fill:var(--foreground);stroke:none}
+#ht-suite-paths .path-chart .node.intermediate.selected{fill:var(--viz-series-1,var(--primary))}
+@media(max-width:540px){#ht-suite-paths .path-panels{grid-template-columns:minmax(0,1fr)}}
+</style>
+<script>
+(() => {
+  const root = document.getElementById('ht-suite-paths');
+  const data = new Map();
+  const files = document.getElementById('trace-files');
+  const status = document.getElementById('trace-status');
+
+  function parseTrace(name, text) {
+    const lines = text.split(/\r?\n/);
+    const header = /^#\s+QUPATH_PATHS\s+(\d+)\s+(CBS|SS)\s+(\d+)\s*$/.exec(lines[0]);
+    if (!header) throw new Error('expected a QUPath trace header');
+    const [, version, mode, layerCount] = header;
+    const filename = /^(.+)_(CBS|SS)_paths\.data$/.exec(name);
+    if (filename && filename[2] !== mode) throw new Error('filename and header disagree on mode');
+    const weighted = mode === 'SS' && version === '2';
+    if (version !== '1' && !weighted) throw new Error('unsupported trace version');
+    const boundaries = Number(layerCount) + 1;
+    const expected = (weighted ? 3 * boundaries : boundaries) + Number(mode === 'SS') + 2;
+    const nodes = Array.from({length: boundaries}, () => new Map());
+    const stateWeights = [];
+    const rows = new Map();
+    const amplitudeGroups = new Map();
+    let totalReal = 0, totalImag = 0, mass = 0, count = 0;
+    for (let lineNumber = 1; lineNumber < lines.length; lineNumber++) {
+      const line = lines[lineNumber].trim();
+      if (!line || line.startsWith('#')) continue;
+      const fields = line.split(/\s+/);
+      const ids = [];
+      if (fields.length !== expected) throw new Error('wrong number of columns on line ' + (lineNumber + 1));
+      for (let j = 0; j < expected - 2;) {
+        const id = fields[j++];
+        if (!/^\d+$/.test(id)) throw new Error('invalid ID on line ' + (lineNumber + 1));
+        if (weighted && ids.length < boundaries) {
+          const weights = fields.slice(j, j + 2);
+          j += 2;
+          if (!weights.every(w => Number.isFinite(Number(w)))) throw new Error('invalid prefix weight on line ' + (lineNumber + 1));
+          const layer = ids.length;
+          const key = [id, ...weights.map(w => Number(w) === 0 ? '0' : Number(w).toPrecision(12))].join(',');
+          if (!nodes[layer].has(key)) {
+            const index = nodes[layer].size;
+            nodes[layer].set(key, index);
+            (stateWeights[layer] ??= [])[index] = [id, ...weights];
+          }
+          ids.push(nodes[layer].get(key));
+        } else {
+          ids.push(id);
+        }
+      }
+      const [real, imag] = fields.slice(-2).map(Number);
+      if (!Number.isFinite(real) || !Number.isFinite(imag)) throw new Error('invalid amplitude on line ' + (lineNumber + 1));
+      const magnitude = Math.hypot(real, imag);
+      if (magnitude) {
+        // Group at the same magnitude-relative precision as the Matplotlib tool.
+        const scale = 10 ** Math.floor(Math.log10(magnitude));
+        const amplitudeKey = [real, imag].map(value =>
+          Math.round(value / (scale || Number.MIN_VALUE) * 1e11)).join(',');
+        const groupKey = Math.floor(Math.log10(magnitude)) + ':' + amplitudeKey;
+        if (!amplitudeGroups.has(groupKey)) amplitudeGroups.set(groupKey, {real:0, imag:0, count:0});
+        const group = amplitudeGroups.get(groupKey);
+        group.real += real;
+        group.imag += imag;
+        group.count++;
+        totalReal += real;
+        totalImag += imag;
+        mass += magnitude;
+        count++;
+      }
+      const key = ids.join(',');
+      if (!rows.has(key)) rows.set(key, {ids, count:0, real:0, imag:0});
+      const row = rows.get(key);
+      row.count++;
+      row.real += real;
+      row.imag += imag;
+    }
+    return {name: filename?.[1] ?? name, mode, boundaries, rows:[...rows.values()], stateWeights, amplitudeGroups, totalReal, totalImag, mass, count};
+  }
+
+  const ns = 'http://www.w3.org/2000/svg';
+  function mark(parent, type, attrs, content) {
+    const element = document.createElementNS(ns, type);
+    for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
+    if (content !== undefined) element.textContent = content;
+    if (attrs['data-tooltip']) {
+      const title = document.createElementNS(ns, 'title');
+      title.textContent = attrs['data-tooltip'];
+      element.append(title);
+    }
+    parent.append(element);
+    return element;
+  }
+  const circuit = document.getElementById('ht-circuit');
+  const panels = [...root.querySelectorAll('[data-mode]')];
+  function renderPanel(panel, levels) {
+    const mode = panel.dataset.mode;
+    const trace = data.get(circuit.value)?.get(mode);
+    panel.hidden = !trace;
+    if (!trace) return;
+    const {rows, stateWeights} = trace;
+    const select = panel.querySelector('select');
+    const chart = panel.querySelector('.path-chart');
+    const detail = panel.querySelector('.path-amplitude');
+    panel.querySelector('.path-count').textContent = rows.reduce((n,r) => n+r.count,0).toLocaleString() + ' nonzero paths · time ↓';
+    select.replaceChildren(new Option('All sequences', 'all'));
+    select.disabled = !rows.length;
+    if (!rows.length) {
+      detail.textContent = 'No nonzero paths in this trace.';
+      chart.replaceChildren();
+      return;
+    }
+    rows.forEach((row, i) => select.add(new Option('Sequence ' + (i+1) + ' · ' + row.count + (row.count===1?' path':' paths'), String(i))));
+    const layers = rows[0].ids.map((_, j) => [...new Set(rows.map(r => r.ids[j]))].sort((a,b) => typeof a === "number" ? a-b : a.length-b.length || a.localeCompare(b)));
+    const edges = new Map();
+    rows.forEach((row, index) => row.ids.slice(1).forEach((to, j) => {
+      const from = row.ids[j];
+      const key = [j,from,to].join(',');
+      if (!edges.has(key)) edges.set(key, {j,from,to,paths:[],count:0});
+      edges.get(key).paths.push(index);
+      edges.get(key).count += row.count;
+    }));
+    const last = layers.length - 1;
+    const boundaryLabel = j => j === 0 ? 'Input' : j === last ? (mode === 'SS' ? 'Projection' : 'Output') : 'Layer '+j;
+    const slots = j => Math.min(8,layers[j].length);
+    const x = (j,id) => {
+      const index = layers[j].indexOf(id);
+      const rowSize = Math.min(slots(j),layers[j].length - Math.floor(index/slots(j))*slots(j));
+      return (29+(index%slots(j)+.5)*69/rowSize) + '%';
+    };
+    const centers = [];
+    let height = 6;
+    for (const count of levels.slice(0, layers.length)) {
+      const band = 46 + (Math.ceil(count/8)-1)*18;
+      centers.push(height + band/2);
+      height += band;
+    }
+    const y = (j,id) => id === undefined ? centers[j] : centers[j] +
+      18*(Math.floor(layers[j].indexOf(id)/slots(j))-(Math.ceil(layers[j].length/8)-1)/2);
+    const render = () => {
+      const selected = select.value === 'all' ? null : Number(select.value);
+      detail.textContent = selected === null ? 'Edge width shows path count' :
+        (rows[selected].count===1?'Amplitude ':'Summed amplitude ('+rows[selected].count+' paths) ') + rows[selected].real.toPrecision(10) + ' ' + (rows[selected].imag<0 ? '− ' : '+ ') + Math.abs(rows[selected].imag).toPrecision(10) + 'i';
+      chart.replaceChildren();
+      const svg = mark(chart,'svg',{role:'img',height,'aria-label':mode+' state graph, time runs top to bottom'});
+      layers.forEach((_,j) => {
+        mark(svg,'line',{x1:'27%',x2:'98%',y1:y(j),y2:y(j),class:'guide'});
+        mark(svg,'text',{x:0,y:y(j),'dominant-baseline':'middle'},
+          boundaryLabel(j));
+      });
+      const ordered = [...edges.values()].sort((a,b) => Number(a.paths.includes(selected))-Number(b.paths.includes(selected)));
+      for (const edge of ordered) {
+        const {j,from,to,paths,count}=edge;
+        const active = paths.includes(selected);
+        mark(svg,'line',{x1:x(j,from),x2:x(j+1,to),y1:y(j,from),y2:y(j+1,to),
+          class:'edge'+(active?' selected':''),'stroke-width':1+Math.log2(count)*.48+(active?1:0),
+          'data-tooltip':boundaryLabel(j)+' → '+boundaryLabel(j+1)+' · '+count+' paths'});
+      }
+      layers.forEach((ids,j) => ids.forEach(id => {
+        const active = selected!==null && rows[selected].ids[j]===id;
+        const endpoint = j === 0 || j === last;
+        mark(svg,'circle',{cx:x(j,id),cy:y(j,id),r:endpoint?11:5,class:'node'+(endpoint?'':' intermediate')+(active?' selected':''),
+          'data-tooltip':boundaryLabel(j)+(endpoint?' · ID '+(stateWeights[j]?.[id]?.[0] ?? id):
+            stateWeights[j]?.[id] ? ' · Weight '+stateWeights[j][id][1]+' + ('+stateWeights[j][id][2]+')i' : '')});
+        if (endpoint) mark(svg,'text',{x:x(j,id),y:y(j,id),'text-anchor':'middle','dominant-baseline':'central','pointer-events':'none'},stateWeights[j]?.[id]?.[0] ?? id);
+      }));
+    };
+    select.onchange = render;
+    render();
+  }
+  const polarSection = document.getElementById('polar-diagrams');
+  const polarPanels = [...root.querySelectorAll('[data-polar-mode]')];
+
+  function renderPolar(panel, trace) {
+    panel.hidden = !trace;
+    panel.replaceChildren();
+    if (!trace) return;
+    const {mode, amplitudeGroups, totalReal, totalImag, mass, count} = trace;
+    const add = (tag, text, className = '') => {
+      const element = document.createElement(tag);
+      element.textContent = text;
+      element.className = className;
+      panel.append(element);
+    };
+    add('h3', mode === 'CBS' ? 'CBS RGB' : 'SS ALL');
+    if (!count) {
+      add('p', 'No nonzero paths · X undefined');
+      return;
+    }
+    const tau = 2 * Math.PI;
+    const lobes = [...amplitudeGroups.values()].map(({real, imag, count}) => ({
+      angle: (Math.atan2(imag, real) + tau) % tau,
+      magnitude: Math.hypot(real, imag) / count,
+      count,
+    })).sort((a, b) => b.magnitude - a.magnitude);
+    const peak = lobes[0].magnitude;
+    const magnitude = Math.hypot(totalReal, totalImag);
+    const rim = magnitude > 1.27 * peak && magnitude <= 1.6 * peak ?
+      1.08 * magnitude : 1.27 * peak;
+    const outside = magnitude > rim;
+    const svg = mark(panel, 'svg', {viewBox:'0 0 360 360', role:'img',
+      'aria-label':mode + ' polar path amplitudes'});
+    const radius = 139;
+    const point = (angle, fraction) => [180 + radius * fraction * Math.cos(angle),
+                                       180 - radius * fraction * Math.sin(angle)];
+    const line = (start, end, attrs) => mark(svg, 'line', {
+      x1:start[0], y1:start[1], x2:end[0], y2:end[1], ...attrs
+    });
+    for (let i = 1; i <= 4; i++) {
+      mark(svg, 'circle', {cx:180, cy:180, r:radius*i/4, fill:'none',
+        stroke:i === 4 ? '#8093a6' : '#d9e2eb'});
+      mark(svg, 'text', {x:184, y:177-radius*i/4, 'font-size':9, fill:'#40546a'},
+           (rim*i/4).toPrecision(3));
+    }
+    for (let degrees = 0; degrees < 360; degrees += 45) {
+      const angle = degrees * Math.PI / 180;
+      line([180,180], point(angle,1), {stroke:'#d9e2eb'});
+      const [x,y] = point(angle,1.2);
+      mark(svg, 'text', {x,y,'dominant-baseline':'middle','text-anchor':'middle',
+        'font-size':10,fill:'currentColor'}, degrees + '°');
+    }
+    const phases = [...new Set(lobes.map(lobe => Math.round(lobe.angle * 1e11) / 1e11))].sort((a,b) => a-b);
+    let minGap = tau + phases[0] - phases.at(-1);
+    for (let i = 1; i < phases.length; i++) minGap = Math.min(minGap, phases[i]-phases[i-1]);
+    const maxWidth = Math.min(22*Math.PI/180, .43*minGap);
+    const maxCount = lobes.reduce((max, lobe) => Math.max(max, lobe.count), 0);
+
+    for (const lobe of lobes) {
+      const {angle, magnitude, count} = lobe;
+      const halfWidth = maxWidth * count / maxCount;
+      const coords = Array.from({length:49}, (_,i) => {
+        const t = i/24-1;
+        return point(angle + t*halfWidth, magnitude/rim*Math.cos(t*Math.PI/2));
+      });
+      const label = count.toLocaleString();
+      const tooltip = label + ' paths · magnitude ' + magnitude.toPrecision(7) +
+        ' · phase ' + (angle*180/Math.PI).toFixed(2) + '°';
+      mark(svg,'polygon',{points:coords.map(pair=>pair.join(',')).join(' '),
+        fill:'#c4dbf0',stroke:'#316a9a','stroke-width':1.2,'data-tooltip':tooltip});
+      const [x,y] = point(angle, magnitude/rim + .075);
+      mark(svg,'text',{x,y,fill:'#245b89','font-size':10,'font-weight':700,
+        'text-anchor':'middle','dominant-baseline':'middle'},label);
+    }
+    if (magnitude) {
+      const angle = Math.atan2(totalImag, totalReal);
+      const red = {stroke:'#b92132','stroke-width':2.6};
+      const end = point(angle, Math.min(magnitude/rim,1));
+      line([180,180],end,red);
+      if (outside) {
+        line(end,point(angle,1.10),{...red,'stroke-dasharray':'3 3'});
+        const tip = point(angle,1.12);
+        const [x,y] = point(angle,1.065);
+        const dx = 4*Math.sin(angle), dy = 4*Math.cos(angle);
+        mark(svg,'polygon',{points:[tip,[x+dx,y+dy],[x-dx,y-dy]].join(' '),fill:'#b92132'});
+      } else {
+        mark(svg,'circle',{cx:end[0],cy:end[1],r:3.5,fill:'#b92132'});
+      }
+    }
+    const x = magnitude ? (Math.max(1,mass/magnitude)**2).toPrecision(5) : '∞';
+    add('p',count.toLocaleString() + ' nonzero paths · X = ' + x);
+    const sign = totalImag < 0 ? ' − ' : ' + ';
+    add('p','Coherent sum  A = ' + totalReal.toPrecision(6) + sign +
+      Math.abs(totalImag).toPrecision(6) + 'i','polar-sum');
+    if (outside) add('p','Off scale · |A| is ' + (magnitude/rim).toPrecision(3) +
+      '× the rim radius','polar-overflow');
+  }
+
+  const render = () => {
+    const traces = [...(data.get(circuit.value)?.values() ?? [])];
+    const levels = Array.from({length: Math.max(0, ...traces.map(t => t.boundaries + Number(t.mode === 'SS')))},
+      (_, j) => Math.max(1, ...traces.map(t => new Set(t.rows.map(row => row.ids[j])).size)));
+    panels.forEach(panel => renderPanel(panel, levels));
+    polarSection.hidden = !traces.length;
+    polarPanels.forEach(panel =>
+      renderPolar(panel, data.get(circuit.value)?.get(panel.dataset.polarMode)));
+  };
+  let loadGeneration = 0;
+  files.addEventListener('change', async () => {
+    const generation = ++loadGeneration;
+    const errors = [];
+    const loaded = new Map();
+    status.textContent = 'Reading traces…';
+    for (const file of files.files) {
+      try {
+        const trace = parseTrace(file.name, await file.text());
+        if (!loaded.has(trace.name)) loaded.set(trace.name, new Map());
+        const pair = loaded.get(trace.name);
+        if (pair.has(trace.mode)) throw new Error('duplicate trace for this circuit and mode');
+        if ([...pair.values()].some(other => other.boundaries !== trace.boundaries)) {
+          throw new Error('paired traces have different layer counts');
+        }
+        pair.set(trace.mode, trace);
+      } catch (error) {
+        errors.push(file.name + ': ' + error.message);
+      }
+    }
+    if (generation !== loadGeneration) return;
+    data.clear();
+    for (const [name, pair] of loaded) data.set(name, pair);
+    circuit.replaceChildren(...[...data.keys()].map(name => new Option(name, name)));
+    circuit.disabled = !data.size;
+    status.textContent = errors.length ? errors.join(' · ') :
+      data.size ? 'Loaded ' + data.size + (data.size === 1 ? ' circuit.' : ' circuits.') :
+        'Select one or more QUPath trace files.';
+    render();
+  });
+  circuit.addEventListener('change', render);
+  render();
+})();
+</script>
+</html>
