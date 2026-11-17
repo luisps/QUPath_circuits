@@ -2,11 +2,13 @@
 
 ## Paths trace diagram
 
-Open `clifford-ht-paths.html` in a web browser and use **Trace files** to select one or more QUPath `.data` files. The browser reads them locally, so the viewer works offline without a server. Select both `<circuit>_CBS_paths.data` and `<circuit>_SS_paths.data` for a side-by-side comparison. Select files for several circuits at once to switch among them using the **Circuit** menu. Use traces generated for the same input and output when comparing the two modes.
+Open `clifford-ht-paths.html` in a web browser and choose a **Circuit folder**, such as `CLIFFORD_H_T`. The viewer looks for `<circuit>.qasm` beside `<circuit>_CBS_paths.data`, `<circuit>_SS_paths.data`, or both. You can also pick a parent folder and browse matching circuits in its subfolders. Pick a circuit from the **Circuit** menu to load its QASM and traces locally. Use traces generated for the same input and output when comparing CBS and SS.
 
 Time runs from top to bottom. Hover over nodes and edges for details, or use **Highlight state sequence** to inspect a path. In SS version 2 traces, nodes split when paths share a state ID but have different phase-adjusted prefix weights at the viewer's 12-significant-digit grouping precision. Older SS version 1 traces show state IDs only.
 
 The viewer draws the polar diagrams below the path diagrams using the same loaded traces and **Circuit** selection. Hover over a lobe for its path count, amplitude magnitude, and phase.
+
+The circuit diagram above the path diagrams draws QUPath’s numbered layers from left to right. Hover over a gate to see its operands and parameters. The circuit view supports the indexed one- and two-qubit operations used by QUPath’s OpenQASM 2 importer.
 
 ## Polar diagram exports
 

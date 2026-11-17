@@ -5,9 +5,14 @@
 <title>QUPath trace viewer</title>
 <div id="ht-suite-paths">
   <h1>QUPath trace viewer</h1>
-  <label>Trace files <input id="trace-files" type="file" accept=".data" multiple></label>
-  <p id="trace-status" role="status">Select one or more QUPath trace files.</p>
+  <label>Circuit folder <input id="circuit-folder" type="file" webkitdirectory></label>
+  <p id="trace-status" role="status">Choose a folder containing QASM files and their path traces.</p>
   <label class="form-label">Circuit <select class="form-control" id="ht-circuit" disabled></select></label>
+  <section id="circuit-section">
+    <h2>Circuit diagram</h2>
+    <p id="qasm-status" role="status"></p>
+    <div id="circuit-schematic"></div>
+  </section>
   <div class="path-panels">
     <section data-mode="CBS"><h2>CBS RGB</h2><div class="path-count text-small text-muted"></div><label class="form-label">Highlight state sequence <select class="form-control"></select></label><div class="path-amplitude text-small" aria-live="polite"></div><div class="path-chart"></div></section>
     <section data-mode="SS"><h2>SS ALL</h2><div class="path-count text-small text-muted"></div><label class="form-label">Highlight state sequence <select class="form-control"></select></label><div class="path-amplitude text-small" aria-live="polite"></div><div class="path-chart"></div></section>
@@ -21,6 +26,10 @@
   </section>
 </div>
 <style>
+#circuit-section{margin-top:1.5rem}
+#circuit-schematic{overflow-x:auto}
+#circuit-schematic svg{display:block;max-width:none}
+
 #polar-diagrams{margin-top:2rem;border-top:1px solid var(--border)}
 #polar-diagrams [data-polar-mode]{text-align:center}
 #polar-diagrams svg{display:block;width:100%;max-width:440px;margin:auto;color:var(--foreground)}
@@ -47,8 +56,9 @@
 <script>
 (() => {
   const root = document.getElementById('ht-suite-paths');
-  const data = new Map();
-  const files = document.getElementById('trace-files');
+  let tracesByMode = new Map();
+  let diagram;
+  const folder = document.getElementById('circuit-folder');
   const status = document.getElementById('trace-status');
 
   function parseTrace(name, text) {
@@ -138,7 +148,7 @@
   const panels = [...root.querySelectorAll('[data-mode]')];
   function renderPanel(panel, levels) {
     const mode = panel.dataset.mode;
-    const trace = data.get(circuit.value)?.get(mode);
+    const trace = tracesByMode.get(mode);
     panel.hidden = !trace;
     if (!trace) return;
     const {rows, stateWeights} = trace;
@@ -308,46 +318,189 @@
       '× the rim radius','polar-overflow');
   }
 
+  const schematic = document.getElementById('circuit-schematic');
+  const qasmStatus = document.getElementById('qasm-status');
+
+  function parseQasm(source) {
+    const statements = source.replace(/\/\/[^\n]*/g, '').split(';').map(s => s.trim()).filter(Boolean);
+    if (statements.shift() !== 'OPENQASM 2.0') throw new Error('expected OpenQASM 2.0');
+    const registers = new Map();
+    const labels = [];
+    const nextLayer = [];
+    const layers = [];
+    for (const statement of statements) {
+      if (/^(include|creg|barrier)\b/.test(statement)) continue;
+      const register = /^qreg\s+(\w+)\s*\[\s*(\d+)\s*\]$/.exec(statement);
+      if (register) {
+        const [, name, size] = register;
+        if (registers.has(name) || +size < 1 || labels.length + +size > 64) {
+          throw new Error('invalid quantum register ' + name);
+        }
+        registers.set(name, {start:labels.length, size:+size});
+        for (let i = 0; i < +size; i++) labels.push(name + '[' + i + ']');
+        continue;
+      }
+      const gate = /^(\w+)(.*?)\s+(\w+\s*\[\s*\d+\s*\](?:\s*,\s*\w+\s*\[\s*\d+\s*\])?)$/.exec(statement);
+      if (!gate || /^(measure|reset|if|gate|opaque)$/.test(gate[1]) ||
+          (gate[2].trim() && !/^\(.*\)$/.test(gate[2].trim()))) {
+        throw new Error('unsupported statement: ' + statement);
+      }
+      const [, name, parameters, operands] = gate;
+      const wires = operands.split(',').map(operand => {
+        const [, registerName, index] = /^(\w+)\s*\[\s*(\d+)\s*\]$/.exec(operand.trim());
+        const reg = registers.get(registerName);
+        if (!reg || +index >= reg.size) throw new Error('invalid operand ' + operand);
+        return reg.start + +index;
+      });
+      if (new Set(wires).size !== wires.length) throw new Error('repeated gate operand');
+      const layer = Math.max(...wires.map(wire => nextLayer[wire] ?? 0));
+      for (const wire of wires) nextLayer[wire] = layer + 1;
+      (layers[layer] ??= []).push({name:name.toUpperCase(), parameters:parameters.trim(), wires});
+    }
+    if (!labels.length) throw new Error('no quantum registers');
+    return {labels, layers};
+  }
+
+  function renderSchematic(traces) {
+    schematic.replaceChildren();
+    qasmStatus.textContent = '';
+    if (!diagram) return;
+    const {labels, layers} = diagram;
+    if (traces.some(trace => trace.boundaries !== layers.length + 1)) {
+      qasmStatus.textContent = 'The QASM layer count differs from the selected trace.';
+      return;
+    }
+    qasmStatus.textContent = diagram.name + ' · ' + labels.length + ' qubits · ' + layers.length + ' layers';
+    let offset = 84;
+    const columns = layers.map(layer => {
+      const start = offset;
+      const gates = [];
+      const bottom = [];
+      for (const gate of layer) {
+        const top = Math.min(...gate.wires), end = Math.max(...gate.wires);
+        let slot = bottom.findIndex(last => last < top);
+        if (slot < 0) slot = bottom.length;
+        bottom[slot] = end;
+        gates.push({...gate, x:start + 27 + 54*slot});
+      }
+      offset += bottom.length * 54 + 12;
+      return {start,end:offset,gates};
+    });
+    const width = offset + 12, height = 55 + labels.length * 36;
+    const svg = mark(schematic,'svg',{width,height,viewBox:'0 0 '+width+' '+height,
+      role:'img','aria-label':diagram.name+' circuit in QUPath layer order'});
+    const y = wire => 52 + wire*36;
+    const line = (x1,y1,x2,y2,stroke) => mark(svg,'line',{x1,y1,x2,y2,stroke,'stroke-width':1.4});
+    const label = (x,y,text,anchor='middle') => mark(svg,'text',{x,y,'text-anchor':anchor,
+      'dominant-baseline':'central','font-size':12,fill:'#182537'},text);
+    for (const [index,column] of columns.entries()) {
+      if (index%2 === 0) mark(svg,'rect',{x:column.start,y:29,width:column.end-column.start,
+        height:height-29,fill:'#f1f6fb'});
+      label((column.start+column.end)/2,15,'Layer '+(index+1));
+    }
+    labels.forEach((name,index) => {
+      label(8,y(index),name,'start');
+      line(72,y(index),width-8,y(index),'#9aabbd');
+    });
+    for (const {gates} of columns) {
+      for (const {name,parameters,wires,x} of gates) {
+        const group = mark(svg,'g',{'data-tooltip':name+parameters+' '+wires.map(wire=>labels[wire]).join(', ')});
+        const gateBox = (wire,text) => {
+          mark(group,'rect',{x:x-22,y:y(wire)-12,width:44,height:24,rx:4,fill:'#e0efff',stroke:'#316a9a'});
+          mark(group,'text',{x,y:y(wire),'text-anchor':'middle','dominant-baseline':'central',
+            'font-size':11,fill:'#182537'},text);
+        };
+        if (wires.length === 2) {
+          mark(group,'line',{x1:x,x2:x,y1:y(wires[0]),y2:y(wires[1]),stroke:'#125db1','stroke-width':1.8});
+          if (/^C(X|Y|Z|H|P|U1|RX|RY|RZ)$/.test(name)) {
+            mark(group,'circle',{cx:x,cy:y(wires[0]),r:4,fill:'#125db1'});
+            if (name === 'CX') {
+              const target = y(wires[1]);
+              mark(group,'circle',{cx:x,cy:target,r:9,fill:'#fff',stroke:'#125db1','stroke-width':1.7});
+              mark(group,'path',{d:'M '+(x-7)+' '+target+' h 14 M '+x+' '+(target-7)+' v 14',
+                stroke:'#125db1',fill:'none'});
+            } else gateBox(wires[1],name.slice(1));
+          } else wires.forEach(wire=>gateBox(wire,name));
+        } else gateBox(wires[0],name);
+      }
+    }
+  }
+
   const render = () => {
-    const traces = [...(data.get(circuit.value)?.values() ?? [])];
+    const traces = [...tracesByMode.values()];
+    renderSchematic(traces);
     const levels = Array.from({length: Math.max(0, ...traces.map(t => t.boundaries + Number(t.mode === 'SS')))},
       (_, j) => Math.max(1, ...traces.map(t => new Set(t.rows.map(row => row.ids[j])).size)));
     panels.forEach(panel => renderPanel(panel, levels));
     polarSection.hidden = !traces.length;
     polarPanels.forEach(panel =>
-      renderPolar(panel, data.get(circuit.value)?.get(panel.dataset.polarMode)));
+      renderPolar(panel, tracesByMode.get(panel.dataset.polarMode)));
   };
+  const folderCircuits = new Map();
   let loadGeneration = 0;
-  files.addEventListener('change', async () => {
+
+  async function loadCircuit() {
     const generation = ++loadGeneration;
+    const entry = folderCircuits.get(circuit.value);
+    tracesByMode = new Map();
+    diagram = undefined;
+    render();
+    if (!entry) {
+      status.textContent = 'No QASM files with matching CBS or SS traces were found.';
+      return;
+    }
+    status.textContent = 'Loading ' + entry.name + '…';
     const errors = [];
-    const loaded = new Map();
-    status.textContent = 'Reading traces…';
-    for (const file of files.files) {
+    let loadedDiagram;
+    const loadedTraces = new Map();
+    try {
+      loadedDiagram = {name:entry.name, ...parseQasm(await entry.qasm.text())};
+    } catch (error) {
+      errors.push(entry.qasm.name + ': ' + error.message);
+    }
+    for (const [mode, file] of entry.traces) {
       try {
         const trace = parseTrace(file.name, await file.text());
-        if (!loaded.has(trace.name)) loaded.set(trace.name, new Map());
-        const pair = loaded.get(trace.name);
-        if (pair.has(trace.mode)) throw new Error('duplicate trace for this circuit and mode');
-        if ([...pair.values()].some(other => other.boundaries !== trace.boundaries)) {
+        const other = loadedTraces.values().next().value;
+        if (other && trace.boundaries !== other.boundaries) {
           throw new Error('paired traces have different layer counts');
         }
-        pair.set(trace.mode, trace);
+        loadedTraces.set(mode, trace);
       } catch (error) {
         errors.push(file.name + ': ' + error.message);
       }
     }
     if (generation !== loadGeneration) return;
-    data.clear();
-    for (const [name, pair] of loaded) data.set(name, pair);
-    circuit.replaceChildren(...[...data.keys()].map(name => new Option(name, name)));
-    circuit.disabled = !data.size;
+    diagram = loadedDiagram;
+    tracesByMode = loadedTraces;
     status.textContent = errors.length ? errors.join(' · ') :
-      data.size ? 'Loaded ' + data.size + (data.size === 1 ? ' circuit.' : ' circuits.') :
-        'Select one or more QUPath trace files.';
+      'Loaded ' + entry.name + ' · ' + [...loadedTraces.keys()].join(' and ');
     render();
+  }
+
+  folder.addEventListener('change', () => {
+    folderCircuits.clear();
+    const byPath = new Map([...folder.files].map(file => [file.webkitRelativePath || file.name, file]));
+    for (const [path, qasm] of byPath) {
+      if (!path.endsWith('.qasm')) continue;
+      const stem = path.slice(0,-5);
+      const traces = new Map();
+      for (const mode of ['CBS','SS']) {
+        const file = byPath.get(stem + '_' + mode + '_paths.data');
+        if (file) traces.set(mode, file);
+      }
+      if (traces.size) folderCircuits.set(stem, {name:qasm.name.slice(0,-5), qasm, traces});
+    }
+    const names = new Map();
+    for (const {name} of folderCircuits.values()) names.set(name, (names.get(name) ?? 0) + 1);
+    const options = [...folderCircuits].sort(([a],[b]) => a.localeCompare(b, undefined, {numeric:true}));
+    circuit.replaceChildren(...options.map(([path,{name}]) =>
+      new Option(names.get(name) > 1 ? path : name, path)));
+    circuit.disabled = !options.length;
+    if (options.length) circuit.value = options[0][0];
+    return loadCircuit();
   });
-  circuit.addEventListener('change', render);
+  circuit.addEventListener('change', loadCircuit);
   render();
 })();
 </script>
