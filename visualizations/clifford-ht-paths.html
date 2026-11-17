@@ -8,6 +8,12 @@
   <label>Circuit folder <input id="circuit-folder" type="file" webkitdirectory></label>
   <p id="trace-status" role="status">Choose a folder containing QASM files and their path traces.</p>
   <label class="form-label">Circuit <select class="form-control" id="ht-circuit" disabled></select></label>
+  <details id="svg-exports" hidden>
+    <summary>Export SVG</summary>
+    <button type="button" data-export-kind="circuit">Save circuit SVG</button>
+    <button type="button" data-export-kind="paths">Save paths SVG</button>
+    <button type="button" data-export-kind="polar">Save polar SVG</button>
+  </details>
   <section id="circuit-section">
     <h2>Circuit diagram</h2>
     <p id="qasm-status" role="status"></p>
@@ -26,6 +32,10 @@
   </section>
 </div>
 <style>
+#svg-exports{margin-top:.75rem}
+#svg-exports summary{cursor:pointer;width:fit-content}
+#svg-exports button{font:inherit;margin:.5rem .25rem 0 0}
+
 #circuit-section{margin-top:1.5rem}
 #circuit-schematic{overflow-x:auto}
 #circuit-schematic svg{display:block;max-width:none}
@@ -426,6 +436,89 @@
     }
   }
 
+  const exportMenu = document.getElementById('svg-exports');
+  const exportButtons = [...exportMenu.querySelectorAll('button')];
+
+  function exportPanels(kind) {
+    if (kind === 'circuit') {
+      const svg = schematic.querySelector('svg');
+      return svg ? [{svg, width:Number(svg.getAttribute('width')),
+        height:Number(svg.getAttribute('height')), title:qasmStatus.textContent, notes:[]}] : [];
+    }
+    if (kind === 'paths') {
+      return panels.filter(panel => !panel.hidden).map(panel => {
+        const svg = panel.querySelector('.path-chart svg');
+        return {svg, width:560, height:svg ? Number(svg.getAttribute('height')) : 40,
+          title:panel.querySelector('h2').textContent,
+          notes:[panel.querySelector('.path-count').textContent,
+                 panel.querySelector('.path-amplitude').textContent]};
+      });
+    }
+    return polarPanels.filter(panel => !panel.hidden).map(panel => ({
+      svg:panel.querySelector('svg'), width:440, height:panel.querySelector('svg') ? 440 : 40,
+      title:panel.querySelector('h3').textContent,
+      notes:[...panel.querySelectorAll('p')].map(p => p.textContent),
+    }));
+  }
+
+  function exportSvg(kind) {
+    const views = exportPanels(kind);
+    if (!views.length) return;
+    const padding = 16, gap = 24, chartTop = 66, lineHeight = 22;
+    const width = views.reduce((sum, view) => sum + view.width, 0) +
+      2 * padding + gap * (views.length - 1);
+    const height = Math.max(...views.map(view => chartTop + view.height +
+      lineHeight * view.notes.length)) + padding;
+    const output = document.createElementNS(ns,'svg');
+    output.setAttribute('width',width);
+    output.setAttribute('height',height);
+    output.setAttribute('viewBox','0 0 '+width+' '+height);
+    output.setAttribute('font-family','Arial, sans-serif');
+    mark(output,'rect',{width,height,fill:'#ffffff'});
+    mark(output,'text',{x:padding,y:28,fill:'#182537','font-size':19,'font-weight':'bold'},
+      folderCircuits.get(circuit.value).name);
+    let left = padding;
+    for (const {svg, width, height, title, notes} of views) {
+      mark(output,'text',{x:left,y:52,fill:'#182537','font-size':15,'font-weight':'bold'},title);
+      if (svg) {
+        const copy = svg.cloneNode(true);
+        copy.setAttribute('x',left);
+        copy.setAttribute('y',chartTop);
+        copy.setAttribute('width',width);
+        copy.setAttribute('height',height);
+        const styles = ['fill','fill-opacity','stroke','stroke-width','stroke-opacity',
+          'stroke-dasharray','font-size','font-weight'];
+        const originalMarks = svg.querySelectorAll('g, line, circle, path, polygon, rect, text');
+        const copiedMarks = copy.querySelectorAll('g, line, circle, path, polygon, rect, text');
+        originalMarks.forEach((element,index) => {
+          const computed = getComputedStyle(element);
+          for (const property of styles) {
+            const value = computed.getPropertyValue(property);
+            if (value) copiedMarks[index].setAttribute(property,value);
+          }
+        });
+        output.append(copy);
+      }
+      notes.forEach((note,index) => {
+        mark(output,'text',{x:left,y:chartTop+height+16+lineHeight*index,'font-size':13,
+          fill:kind === 'polar' && index > 0 ? '#b92132' : '#182537'},note);
+      });
+      left += width + gap;
+    }
+    const xml = new XMLSerializer().serializeToString(output);
+    const url = URL.createObjectURL(new Blob([xml],{type:'image/svg+xml;charset=utf-8'}));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = folderCircuits.get(circuit.value).name + '_' + kind + '.svg';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  exportButtons.forEach(button => button.addEventListener('click', () =>
+    exportSvg(button.dataset.exportKind)));
+
   const render = () => {
     const traces = [...tracesByMode.values()];
     renderSchematic(traces);
@@ -435,6 +528,10 @@
     polarSection.hidden = !traces.length;
     polarPanels.forEach(panel =>
       renderPolar(panel, tracesByMode.get(panel.dataset.polarMode)));
+    exportMenu.hidden = !traces.length && !schematic.querySelector('svg');
+    exportButtons.forEach(button => {
+      button.disabled = !exportPanels(button.dataset.exportKind).length;
+    });
   };
   const folderCircuits = new Map();
   let loadGeneration = 0;

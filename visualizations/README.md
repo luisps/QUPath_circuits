@@ -10,6 +10,10 @@ The viewer draws the polar diagrams below the path diagrams using the same loade
 
 The circuit diagram above the path diagrams draws QUPath’s numbered layers from left to right. Hover over a gate to see its operands and parameters. The circuit view supports the indexed one- and two-qubit operations used by QUPath’s OpenQASM 2 importer.
 
+## SVG exports
+
+Choose a circuit, open **Export SVG**, and save the circuit, path, or polar diagram. Path and polar exports include both CBS and SS panels when both traces are available. The path export includes the current sequence highlight. Insert the downloaded SVG in PowerPoint using **Insert → Pictures**.
+
 ## Polar diagram exports
 
 `plot_path_amplitudes.py` reads one or more QUPath path traces and writes a static figure. From this directory, run the following commands with a Python environment that has Matplotlib installed.
